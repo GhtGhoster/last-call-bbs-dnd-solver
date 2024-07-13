@@ -14,10 +14,13 @@ const GRAY: [u8; 4] = [98, 91, 77, 255];
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 const WHITE: [u8; 4] = [255, 255, 255, 255];
 
+#[derive(PartialEq, Eq, Clone)]
 enum Tile {
-    Ground,
+    Unsure,
     Chest,
     Monster,
+    Ground,
+    Wall,
 }
 
 fn main() {
@@ -49,21 +52,13 @@ fn main() {
             if image == chest_image {
                 row.push(Tile::Chest);
             } else if ground_images.contains(&image) {
-                row.push(Tile::Ground);
+                row.push(Tile::Unsure);
             } else {
                 row.push(Tile::Monster);
             }
         }
         matrix.push(row);
     }
-
-    let image = screen.capture_area(
-        TILE_X - TILE_SIZE,
-        TILE_Y + TILE_SIZE*0,
-        TILE_SIZE as u32,
-        TILE_SIZE as u32,
-    ).unwrap();
-    detect_number(image);
 
     // detect numbers
     let mut nums_columns = vec![];
@@ -88,7 +83,277 @@ fn main() {
         nums_columns.push(detect_number(image));
     }
 
-    // print debug
+    // resolve certainties
+    loop {
+        let last_matrix = matrix.clone();
+        collapse_certainties(&mut matrix, &nums_columns, &nums_rows);
+        if matrix == last_matrix {
+            break;
+        }
+    }
+    debug_print(&matrix, &nums_columns, &nums_rows);
+
+    // generate all random collapses
+    // for each, loop
+    //  if impossible, remove from list
+    //  collapse certainties
+    //  if no change, break loop
+    // if win, return win
+    // if list empty, return none
+    // sort them by how much they collapsed
+    //  either how many collapse cycles they went through
+    //  or how many parts of the matrix are now collapsed (probably better)
+    // recurse with all until win
+
+    // let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    // enigo.move_mouse(x as i32, y as i32, Coordinate::Abs).unwrap();
+    // sleep(Duration::from_millis(50));
+    // enigo.button(enigo::Button::Left, enigo::Direction::Click).unwrap();
+    // sleep(Duration::from_millis(50));
+}
+
+fn is_impossible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> bool {
+    // check for 2x2 spaces
+    for x in 0..7 {
+        for y in 0..7 {
+            if 
+                matrix[y][x] == Tile::Ground &&
+                matrix[y+1][x] == Tile::Ground &&
+                matrix[y][x+1] == Tile::Ground &&
+                matrix[y+1][x+1] == Tile::Ground
+            {
+                return false;
+            }
+        }
+    }
+    // check for treasure room impossibilities
+    // TODO
+
+    false
+}
+
+fn collapse_certainties(matrix: &mut Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) {
+    let directions: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+
+    // collapse resolved rows
+    for i in 0..8 {
+        let unsure_count = matrix[i].iter().filter(|item| item == &&Tile::Unsure).count();
+        let wall_count = matrix[i].iter().filter(|item| item == &&Tile::Wall).count();
+        if unsure_count == nums_rows[i] - wall_count {
+            for j in 0..8 {
+                if matrix[i][j] == Tile::Unsure {
+                    matrix[i][j] = Tile::Wall;
+                }
+            }
+        }
+        if wall_count == nums_rows[i] && unsure_count > 0 {
+            for j in 0..8 {
+                if matrix[i][j] == Tile::Unsure {
+                    matrix[i][j] = Tile::Ground;
+                }
+            }
+        }
+    }
+
+    // collapse resolved columns
+    for i in 0..8 {
+        let unsure_count = matrix.iter().filter(|row| row[i] == Tile::Unsure).count();
+        let wall_count = matrix.iter().filter(|row| row[i] == Tile::Wall).count();
+        if unsure_count == nums_columns[i] - wall_count {
+            for j in 0..8 {
+                if matrix[j][i] == Tile::Unsure {
+                    matrix[j][i] = Tile::Wall;
+                }
+            }
+        }
+        if wall_count == nums_columns[i] && unsure_count > 0 {
+            for j in 0..8 {
+                if matrix[j][i] == Tile::Unsure {
+                    matrix[j][i] = Tile::Ground;
+                }
+            }
+        }
+    }
+
+    // collapse monster escape routes
+    for y in 0..8 {
+        for x in 0..8 {
+            if matrix[y][x] == Tile::Monster {
+                let mut walls = 0;
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            if tile == &Tile::Wall {
+                                walls += 1;
+                            }
+                        } else {
+                            walls += 1;
+                        }
+                    } else {
+                        walls += 1;
+                    }
+                }
+                if walls == 3 {
+                    for (dx, dy) in directions {
+                        let nx = (x as i32 + dx) as usize;
+                        let ny = (y as i32 + dy) as usize;
+                        if let Some(row) = matrix.get_mut(ny) {
+                            if let Some(tile) = row.get_mut(nx) {
+                                if tile != &Tile::Wall {
+                                    *tile = Tile::Ground;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // collapse monster wall enclosures
+    for y in 0..8 {
+        for x in 0..8 {
+            if matrix[y][x] == Tile::Monster {
+                let mut escape_route = false;
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            if tile == &Tile::Ground {
+                                escape_route = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if escape_route {
+                    for (dx, dy) in directions {
+                        let nx = (x as i32 + dx) as usize;
+                        let ny = (y as i32 + dy) as usize;
+                        if let Some(row) = matrix.get_mut(ny) {
+                            if let Some(tile) = row.get_mut(nx) {
+                                if tile != &Tile::Ground {
+                                    *tile = Tile::Wall;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // rows and cols with a chest always have at least 2 ground tiles
+    for y in 0..8 {
+        for x in 0..8 {
+            if matrix[y][x] == Tile::Chest {
+                // wall is right next to chest
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            if tile == &Tile::Wall {
+                                let mx = (x as i32 - dx) as usize;
+                                let my = (y as i32 - dy) as usize;
+                                let mx2 = (x as i32 - dx * 2) as usize;
+                                let my2 = (y as i32 - dy * 2) as usize;
+                                matrix[my][mx] = Tile::Ground;
+                                matrix[my2][mx2] = Tile::Ground;
+                            }
+                        } else {
+                            let mx = (x as i32 - dx) as usize;
+                            let my = (y as i32 - dy) as usize;
+                            let mx2 = (x as i32 - dx * 2) as usize;
+                            let my2 = (y as i32 - dy * 2) as usize;
+                            matrix[my][mx] = Tile::Ground;
+                            matrix[my2][mx2] = Tile::Ground;
+                        }
+                    } else {
+                        let mx = (x as i32 - dx) as usize;
+                        let my = (y as i32 - dy) as usize;
+                        let mx2 = (x as i32 - dx * 2) as usize;
+                        let my2 = (y as i32 - dy * 2) as usize;
+                        matrix[my][mx] = Tile::Ground;
+                        matrix[my2][mx2] = Tile::Ground;
+                    }
+                }
+
+                // wall is gapped from the chest
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx * 2) as usize;
+                    let ny = (y as i32 + dy * 2) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            if tile == &Tile::Wall {
+                                let mx = (x as i32 - dx) as usize;
+                                let my = (y as i32 - dy) as usize;
+                                matrix[my][mx] = Tile::Ground;
+                            }
+                        } else {
+                            let mx = (x as i32 - dx) as usize;
+                            let my = (y as i32 - dy) as usize;
+                            matrix[my][mx] = Tile::Ground;
+                        }
+                    } else {
+                        let mx = (x as i32 - dx) as usize;
+                        let my = (y as i32 - dy) as usize;
+                        matrix[my][mx] = Tile::Ground;
+                    }
+                }
+            }
+        }
+    }
+
+    // let's set some ground rules
+    for y in 0..8 {
+        for x in 0..8 {
+            if matrix[y][x] == Tile::Ground {
+                let mut walls = 0;
+                let mut monsters = 0;
+                let mut unsures = 0;
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            match tile {
+                                Tile::Unsure => unsures += 1,
+                                Tile::Chest => (),
+                                Tile::Monster => monsters += 1,
+                                Tile::Ground => (),
+                                Tile::Wall => walls += 1,
+                            }
+                        } else {
+                            walls += 1;
+                        }
+                    } else {
+                        walls += 1;
+                    }
+                }
+                if unsures != 0 && (monsters == 3 || walls == 2) {
+                    // replace unsure with ground
+                    for (dx, dy) in directions {
+                        let nx = (x as i32 + dx) as usize;
+                        let ny = (y as i32 + dy) as usize;
+                        if let Some(row) = matrix.get_mut(ny) {
+                            if let Some(tile) = row.get_mut(nx) {
+                                if tile == &Tile::Unsure {
+                                    *tile = Tile::Ground
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn debug_print(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) {
     print!(" ");
     for col_num in nums_columns {
         print!("{col_num}");
@@ -98,23 +363,18 @@ fn main() {
         print!("{}", nums_rows[i]);
         for item in row {
             match item {
-                Tile::Chest => print!("#"),
-                Tile::Ground => print!("_"),
+                Tile::Chest => print!("O"),
+                Tile::Unsure => print!("?"),
                 Tile::Monster => print!("!"),
+                Tile::Ground => print!("_"),
+                Tile::Wall => print!("#"),
             }
         }
         println!();
     }
-
-    // let mut enigo = Enigo::new(&Settings::default()).unwrap();
-
-    // enigo.move_mouse(x as i32, y as i32, Coordinate::Abs).unwrap();
-    // sleep(Duration::from_millis(50));
-    // enigo.button(enigo::Button::Left, enigo::Direction::Click).unwrap();
-    // sleep(Duration::from_millis(50));
 }
 
-fn detect_number(image: ImageBuffer<Rgba<u8>, Vec<u8>>) -> u8 {
+fn detect_number(image: ImageBuffer<Rgba<u8>, Vec<u8>>) -> usize {
     for i in 0..8 {
         let comparison_image = Reader::open(format!("assets/numbers/{i}.png")).unwrap().decode().unwrap();
         for dx in -5..=5 {
