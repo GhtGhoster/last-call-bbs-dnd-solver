@@ -91,28 +91,144 @@ fn main() {
             break;
         }
     }
+
+    // solve the matrix by random collapses if necessary
+    if matrix.iter().any(|row| row.iter().any(|tile| tile == &Tile::Unsure)) {
+        matrix = solve(&matrix, &nums_columns, &nums_rows).unwrap();
+    }
     debug_print(&matrix, &nums_columns, &nums_rows);
 
+    // focus window
+    let mut enigo = Enigo::new(&Settings::default()).unwrap();
+    enigo.move_mouse(1920 + 5, 5, Coordinate::Abs).unwrap();
+    sleep(Duration::from_millis(50));
+    enigo.button(enigo::Button::Left, enigo::Direction::Click).unwrap();
+    sleep(Duration::from_millis(50));
+
+    // execute solution
+    for y in 0..8 {
+        for x in 0..8 {
+            if matrix[y][x] == Tile::Wall {
+                enigo.move_mouse(
+                    1920 + TILE_X + (x as i32 * TILE_SIZE) + (TILE_SIZE / 2),
+                    TILE_Y + (y as i32 * TILE_SIZE) + (TILE_SIZE / 2),
+                    Coordinate::Abs,
+                ).unwrap();
+                sleep(Duration::from_millis(50));
+                enigo.button(enigo::Button::Left, enigo::Direction::Click).unwrap();
+                sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> Option<Vec<Vec<Tile>>> {
     // generate all random collapses
+    let mut collapses = random_collapses(matrix, nums_columns, nums_rows);
     // for each, loop
     //  if impossible, remove from list
     //  collapse certainties
     //  if no change, break loop
-    // if win, return win
+    'collapses_loop: for i in (0..collapses.len()).rev() {
+        loop {
+            if !is_possible(&collapses[i], nums_columns, nums_rows) {
+                collapses.remove(i);
+                // debug_print(&collapses.remove(i), nums_columns, nums_rows);
+                continue 'collapses_loop;
+            }
+            let last_matrix = collapses[i].clone();
+            collapse_certainties(&mut collapses[i], nums_columns, nums_rows);
+            if last_matrix == collapses[i] {
+                break;
+            }
+        }
+    }
     // if list empty, return none
+    if collapses.is_empty() {
+        return None;
+    }
     // sort them by how much they collapsed
-    //  either how many collapse cycles they went through
-    //  or how many parts of the matrix are now collapsed (probably better)
+    let mut collapses: Vec<(Vec<Vec<Tile>>, usize)> = collapses.into_iter().map(|collapse| {
+        let mut certainty = 64;
+        for x in 0..8 {
+            for y in 0..8 {
+                if collapse[y][x] == Tile::Unsure {
+                    certainty -= 1;
+                }
+            }
+        }
+        (collapse, certainty)
+    }).collect();
+    collapses.sort_by(|(_, a), (_, b)| b.cmp(&a));
+    // if win, return win
     // recurse with all until win
-
-    // let mut enigo = Enigo::new(&Settings::default()).unwrap();
-    // enigo.move_mouse(x as i32, y as i32, Coordinate::Abs).unwrap();
-    // sleep(Duration::from_millis(50));
-    // enigo.button(enigo::Button::Left, enigo::Direction::Click).unwrap();
-    // sleep(Duration::from_millis(50));
+    for (collapse, certainty) in collapses.iter() {
+        if certainty == &64 {
+            return Some(collapse.clone());
+        }
+        let solution = solve(collapse, nums_columns, nums_rows);
+        if solution.is_some() {
+            return solution;
+        }
+    }
+    None
 }
 
-fn is_impossible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> bool {
+fn random_collapses(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> Vec<Vec<Vec<Tile>>> {
+    let directions: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+    let mut collapses = vec![];
+
+    // collapse monsters
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Monster {
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            if tile == &Tile::Unsure {
+                                let mut new_matrix = matrix.clone();
+                                for (ddx, ddy) in directions {
+                                    let nnx = (x as i32 + ddx) as usize;
+                                    let nny = (y as i32 + ddy) as usize;
+                                    if let Some(row) = new_matrix.get_mut(nny) {
+                                        if let Some(tile) = row.get_mut(nnx) {
+                                            *tile = Tile::Wall;
+                                        }
+                                    }
+                                }
+                                new_matrix[ny][nx] = Tile::Ground;
+                                collapses.push(new_matrix);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // collapse random tiles
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Unsure {
+                let mut new_matrix = matrix.clone();
+                new_matrix[y][x] = Tile::Ground;
+                collapses.push(new_matrix);
+                let mut new_matrix = matrix.clone();
+                new_matrix[y][x] = Tile::Wall;
+                collapses.push(new_matrix);
+            }
+        }
+    }
+
+    // TODO (or not)
+    // collapse treasure rooms
+
+    collapses
+}
+
+fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> bool {
     // check for 2x2 spaces
     for x in 0..7 {
         for y in 0..7 {
@@ -122,14 +238,141 @@ fn is_impossible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: 
                 matrix[y][x+1] == Tile::Ground &&
                 matrix[y+1][x+1] == Tile::Ground
             {
-                return false;
+                let mut chest_found = false;
+                for cx in 0..4 {
+                    for cy in 0..4 {
+                        if cx == 0 || cy == 0 || cx == 3 || cy == 3 {
+                            if let Some(row) = matrix.get(y - 1 + cy) {
+                                if let Some(tile) = row.get(x - 1 + cx) {
+                                    if tile == &Tile::Chest {
+                                        chest_found = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if !chest_found {
+                    return false;
+                }
             }
         }
     }
-    // check for treasure room impossibilities
-    // TODO
 
-    false
+    // check that there exists at least one possible way to have the treasure room
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Chest {
+                let mut ground_possible_coords = vec![];
+                // check for monsters or walls within the area of all possible treasure rooms
+                for dx in 0..3 {
+                    'chest_loop: for dy in 0..3 {
+                        for ix in 0..3 {
+                            for iy in 0..3 {
+                                if let Some(row) = matrix.get(y - dy + iy) {
+                                    if let Some(tile) = row.get(x - dx + ix) {
+                                        if tile == &Tile::Monster || tile == &Tile::Wall {
+                                            continue 'chest_loop;
+                                        }
+                                    } else {
+                                        continue 'chest_loop;
+                                    }
+                                } else {
+                                    continue 'chest_loop;
+                                }
+                            }
+                        }
+                        ground_possible_coords.push((dx, dy));
+                    }
+                }
+                // check for monsters and at least one non-wall tile along the edges
+                'wall_loop: for i in (0..ground_possible_coords.len()).rev() {
+                    let mut entrance_possible = false;
+                    let (dx, dy) = ground_possible_coords[i];
+                    for ix in 0..5 {
+                        for iy in 0..5 {
+                            if ix == 0 || iy == 0 || ix == 4 || iy == 4 {
+                                if let Some(row) = matrix.get(y - dy - 1 + iy) {
+                                    if let Some(tile) = row.get(x - dx - 1 + ix) {
+                                        match tile {
+                                            Tile::Monster => {
+                                                if !((ix == 0 || ix == 4) && (iy == 0 || iy == 4)) {
+                                                    ground_possible_coords.remove(i);
+                                                    continue 'wall_loop;
+                                                }
+                                            },
+                                            Tile::Ground | Tile::Unsure => {
+                                                entrance_possible = true;
+                                            },
+                                            _ => (),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !entrance_possible {
+                        ground_possible_coords.remove(i);
+                    }
+                }
+                if ground_possible_coords.is_empty() {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // check for monster being in dead-ends (no more than 1 ground tile around them)
+    let directions: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Monster {
+                let mut ground_tile = false;
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            match tile {
+                                Tile::Ground | Tile::Unsure => {
+                                    ground_tile = true;
+                                },
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+                if !ground_tile {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // check wall numbers
+    for i in 0..8 {
+        let wall_count = matrix[i].iter().filter(|item| item == &&Tile::Wall).count();
+        let unsure_count = matrix[i].iter().filter(|item| item == &&Tile::Unsure).count();
+        if wall_count > nums_rows[i] {
+            return false;
+        }
+        if wall_count + unsure_count < nums_rows[i] {
+            return false;
+        }
+        let wall_count = matrix.iter().filter(|row| row[i] == Tile::Wall).count();
+        let unsure_count = matrix.iter().filter(|row| row[i] == Tile::Unsure).count();
+        if wall_count > nums_columns[i] {
+            return false;
+        }
+        if wall_count + unsure_count < nums_columns[i] {
+            return false;
+        }
+    }
+
+    // TODO (or not)
+    // check for ground tile continuity
+    // check for treasure room placement rules (1 exit, 3x3ness, ...)
+    true
 }
 
 fn collapse_certainties(matrix: &mut Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) {
