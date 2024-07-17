@@ -125,7 +125,7 @@ fn main() {
 
 fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>, past_matrices: &mut HashSet<Vec<Vec<Tile>>>) -> Option<Vec<Vec<Tile>>> {
     // generate random collapses and weed out impossible and previously checked ones
-    let mut collapses = random_collapses(matrix);
+    let mut collapses = collapse_random(matrix);
     'collapses_loop: for i in (0..collapses.len()).rev() {
         loop {
             if !past_matrices.insert(collapses[i].clone()) {
@@ -175,7 +175,7 @@ fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usi
     None
 }
 
-fn random_collapses(matrix: &Vec<Vec<Tile>>) -> Vec<Vec<Vec<Tile>>> {
+fn collapse_random(matrix: &Vec<Vec<Tile>>) -> Vec<Vec<Vec<Tile>>> {
     let directions: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
     let mut collapses = vec![];
 
@@ -460,6 +460,32 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
         }
     }
 
+    // check that dead-ends contain monsters
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Ground {
+                let mut adj_grounds = 0;
+                let mut adj_monster = false;
+                for (dx, dy) in directions {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            match tile {
+                                Tile::Ground | Tile::Unsure => adj_grounds += 1,
+                                Tile::Monster => adj_monster = true,
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+                if adj_grounds == 1 && !adj_monster {
+                    return false;
+                }
+            }
+        }
+    }
+
     // check wall numbers
     for i in 0..8 {
         let wall_count = matrix[i].iter().filter(|item| item == &&Tile::Wall).count();
@@ -513,6 +539,10 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
             }
             if new_flooded_coords.is_empty() {
                 break;
+            } else {
+                for new_flooded_coord in new_flooded_coords {
+                    flooded_coords.insert(new_flooded_coord);
+                }
             }
         }
     }
