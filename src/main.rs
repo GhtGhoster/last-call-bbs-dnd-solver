@@ -188,6 +188,10 @@ fn collapse_random(matrix: &Vec<Vec<Tile>>) -> Vec<Vec<Vec<Tile>>> {
                     let ny = (y as i32 + dy) as usize;
                     if let Some(row) = matrix.get(ny) {
                         if let Some(tile) = row.get(nx) {
+                            // this collapse runs on a certainty collapsed matrix
+                            // there will never be only a single adjacent unsure tile
+                            // there will never be an adjacent unsure and ground tile at the same time
+                            // this means that every unsure tile can be an exit for the monster
                             if tile == &Tile::Unsure {
                                 let mut new_matrix = matrix.clone();
                                 for (ddx, ddy) in directions {
@@ -312,10 +316,25 @@ fn collapse_random(matrix: &Vec<Vec<Tile>>) -> Vec<Vec<Vec<Tile>>> {
         }
     }
 
+    // TODO:
+    //  this takes too long
+    //  only adding this only when collapses are empty doesn't guarantee
+    //  that the above collapses aren't going to be impossible after certainty collapse
+    // possible solution 1
+    //  add certainty collapse here and remove it from solve()
+    //  THEN check if collapses are empty
+    //  this skips the step of adding them to the past_matrices list though..
+    // possible solution 2
+    //  separate this into another function that gets called in solve() if structural collapses are empty
+    //  remove past_matrices because that will prevent some stuff that might be possible from going through... or not?
+    //
+    //  maybe I just need to add this as a separate function anyway without anything else.
+
     // collapse random tiles
-    // (no need to check for validity as this is only ever used on a certainty collapsed matrix)
     for x in 0..8 {
         for y in 0..8 {
+            // this collapse runs on a certainty collapsed matrix
+            // it will always be possible to collapse unsure tiles to either state
             if matrix[y][x] == Tile::Unsure {
                 let mut new_matrix = matrix.clone();
                 new_matrix[y][x] = Tile::Ground;

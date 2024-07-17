@@ -5,10 +5,8 @@ Automated solution finder and executioner for Last Call BBS Dungeons & Diagrams.
 Get the game on [Steam](https://store.steampowered.com/app/1511780/Last_Call_BBS/).
 
 So far, this gets some easy puzzles right. There's 2 issues it has with harder puzzles:
-- It's really slow (assuming) due to random collapses not collapsing treasure rooms.
-  This could also be a problem with the algorithm itself that only occurs under specific circumstances.
-- It could potentially generate wrong results because checking whether a partial solution is possible doesn't
-  include checking for all cases of all rules, namely ground continuity and all treasure room rules.
+- It's really slow to collapse random tiles, but necessary if we get stuck after collapsing all structures.
+- It could potentially generate wrong results because it doesn't check for all cases of all treasure room rules. 
 
 ## Requirements
 
