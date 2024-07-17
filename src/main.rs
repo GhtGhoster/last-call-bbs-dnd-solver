@@ -14,7 +14,7 @@ const GRAY: [u8; 4] = [98, 91, 77, 255];
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 const WHITE: [u8; 4] = [255, 255, 255, 255];
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Hash)]
 enum Tile {
     Unsure,
     Chest,
@@ -93,8 +93,9 @@ fn main() {
     }
 
     // solve the matrix by random collapses if necessary
+    let mut past_matrices = HashSet::new();
     if matrix.iter().any(|row| row.iter().any(|tile| tile == &Tile::Unsure)) {
-        matrix = solve(&matrix, &nums_columns, &nums_rows).unwrap();
+        matrix = solve(&matrix, &nums_columns, &nums_rows, &mut past_matrices).unwrap();
     }
     debug_print(&matrix, &nums_columns, &nums_rows);
 
@@ -122,18 +123,17 @@ fn main() {
     }
 }
 
-fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> Option<Vec<Vec<Tile>>> {
-    // generate all random collapses
+fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>, past_matrices: &mut HashSet<Vec<Vec<Tile>>>) -> Option<Vec<Vec<Tile>>> {
+    // generate random collapses and weed out impossible and previously checked ones
     let mut collapses = random_collapses(matrix);
-    // for each, loop
-    //  if impossible, remove from list
-    //  collapse certainties
-    //  if no change, break loop
     'collapses_loop: for i in (0..collapses.len()).rev() {
         loop {
+            if !past_matrices.insert(collapses[i].clone()) {
+                collapses.remove(i);
+                continue 'collapses_loop;
+            }
             if !is_possible(&collapses[i], nums_columns, nums_rows) {
                 collapses.remove(i);
-                // debug_print(&collapses.remove(i), nums_columns, nums_rows);
                 continue 'collapses_loop;
             }
             let last_matrix = collapses[i].clone();
@@ -143,11 +143,12 @@ fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usi
             }
         }
     }
-    // if list empty, return none
+
     if collapses.is_empty() {
         return None;
     }
-    // sort them by how much they collapsed
+
+    // score and matrices based on unsure tiles
     let mut collapses: Vec<(Vec<Vec<Tile>>, usize)> = collapses.into_iter().map(|collapse| {
         let mut certainty = 64;
         for x in 0..8 {
@@ -160,13 +161,13 @@ fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usi
         (collapse, certainty)
     }).collect();
     collapses.sort_by(|(_, a), (_, b)| b.cmp(&a));
-    // if win, return win
-    // recurse with all until win
+
+    // seek win
     for (collapse, certainty) in collapses.iter() {
         if certainty == &64 {
             return Some(collapse.clone());
         }
-        let solution = solve(collapse, nums_columns, nums_rows);
+        let solution = solve(collapse, nums_columns, nums_rows, past_matrices);
         if solution.is_some() {
             return solution;
         }
@@ -522,7 +523,6 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
             }
         }
     }
-
 
     // TODO (or not)
     // check for treasure room placement rules (1 exit, 3x3ness, ...)
