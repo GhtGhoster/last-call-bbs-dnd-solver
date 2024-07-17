@@ -1,4 +1,4 @@
-use std::{thread::sleep, time::Duration};
+use std::{collections::HashSet, thread::sleep, time::Duration};
 
 use enigo::{Coordinate, Enigo, Mouse, Settings};
 use screenshots::{image::{imageops::overlay, io::Reader, DynamicImage, ImageBuffer, Rgba}, Screen};
@@ -124,7 +124,7 @@ fn main() {
 
 fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> Option<Vec<Vec<Tile>>> {
     // generate all random collapses
-    let mut collapses = random_collapses(matrix, nums_columns, nums_rows);
+    let mut collapses = random_collapses(matrix);
     // for each, loop
     //  if impossible, remove from list
     //  collapse certainties
@@ -174,7 +174,7 @@ fn solve(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usi
     None
 }
 
-fn random_collapses(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &Vec<usize>) -> Vec<Vec<Vec<Tile>>> {
+fn random_collapses(matrix: &Vec<Vec<Tile>>) -> Vec<Vec<Vec<Tile>>> {
     let directions: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
     let mut collapses = vec![];
 
@@ -208,7 +208,111 @@ fn random_collapses(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_row
         }
     }
 
+    // collapse treasure rooms
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Chest {
+                for chest_offset_x in 0..3 {
+                    'seek_top_left: for chest_offset_y in 0..3 {
+                        let top_left_x = x - 1 - chest_offset_x;
+                        let top_left_y = y - 1 - chest_offset_y;
+                        // verify room position plausible
+                        let mut side_wall_ground = false;
+                        for room_x in 0..5 {
+                            for room_y in 0..5 {
+                                if let Some(row) = matrix.get(top_left_y + room_y) {
+                                    if let Some(tile) = row.get(top_left_x + room_x) {
+                                        if room_x == 0 || room_x == 4 || room_y == 0 || room_y == 4 {
+                                            // room wall
+                                            if !((room_x == 0 || room_x == 4) && (room_y == 0 || room_y == 4)) {
+                                                // not a corner (side wall)
+                                                match tile {
+                                                    Tile::Chest | Tile::Monster => continue 'seek_top_left,
+                                                    Tile::Ground => {
+                                                        if side_wall_ground {
+                                                            continue 'seek_top_left;
+                                                        } else {
+                                                            side_wall_ground = true;
+                                                        }
+                                                    }
+                                                    _ => (),
+                                                }
+                                            }
+                                        } else {
+                                            // room inside
+                                            match tile {
+                                                Tile::Monster | Tile::Wall => continue 'seek_top_left,
+                                                _ => (),
+                                            }
+                                        }
+                                    } else {
+                                        if !(room_x == 0 || room_x == 4 || room_y == 0 || room_y == 4) {
+                                            continue 'seek_top_left;
+                                        }
+                                    }
+                                } else {
+                                    if !(room_x == 0 || room_x == 4 || room_y == 0 || room_y == 4) {
+                                        continue 'seek_top_left;
+                                    }
+                                }
+                            }
+                        }
+                        // top left corner coord verified to be plausible
+                        // generate all certain structures with all possible exits
+                        let mut tmp_matrix = matrix.clone();
+                        for room_x in 0..5 {
+                            for room_y in 0..5 {
+                                if let Some(row) = tmp_matrix.get_mut(top_left_y + room_y) {
+                                    if let Some(tile) = row.get_mut(top_left_x + room_x) {
+                                        if room_x == 0 || room_x == 4 || room_y == 0 || room_y == 4 {
+                                            // room wall
+                                            if !((room_x == 0 || room_x == 4) && (room_y == 0 || room_y == 4)) {
+                                                // not a corner (side wall)
+                                                if tile == &Tile::Unsure {
+                                                    *tile = Tile::Wall;
+                                                }
+                                            }
+                                        } else {
+                                            // room inside
+                                            if tile == &Tile::Unsure {
+                                                *tile = Tile::Ground;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // tmp_matrix contains walled off room or 1 exit room
+                        if side_wall_ground {
+                            // exit already predetermined
+                            collapses.push(tmp_matrix);
+                        } else {
+                            // any exit position plausible
+                            for room_x in 0..5 {
+                                for room_y in 0..5 {
+                                    if let Some(row) = tmp_matrix.get(top_left_y + room_y) {
+                                        if let Some(_) = row.get(top_left_x + room_x) {
+                                            if room_x == 0 || room_x == 4 || room_y == 0 || room_y == 4 {
+                                                if !((room_x == 0 || room_x == 4) && (room_y == 0 || room_y == 4)) {
+                                                    // room wall, not a corner (side wall)
+                                                    let mut exit_matrix = tmp_matrix.clone();
+                                                    exit_matrix[top_left_y + room_y][top_left_x + room_x] = Tile::Ground;
+                                                    collapses.push(exit_matrix);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // collapse random tiles
+    // (no need to check for validity as this is only ever used on a certainty collapsed matrix)
     for x in 0..8 {
         for y in 0..8 {
             if matrix[y][x] == Tile::Unsure {
@@ -221,9 +325,6 @@ fn random_collapses(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_row
             }
         }
     }
-
-    // TODO (or not)
-    // collapse treasure rooms
 
     collapses
 }
@@ -295,7 +396,7 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
                                 if let Some(row) = matrix.get(y - dy - 1 + iy) {
                                     if let Some(tile) = row.get(x - dx - 1 + ix) {
                                         match tile {
-                                            Tile::Monster => {
+                                            Tile::Monster | Tile::Chest => {
                                                 if !((ix == 0 || ix == 4) && (iy == 0 || iy == 4)) {
                                                     ground_possible_coords.remove(i);
                                                     continue 'wall_loop;
@@ -327,6 +428,7 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
     for x in 0..8 {
         for y in 0..8 {
             if matrix[y][x] == Tile::Monster {
+                let mut ground_tile_possible = false;
                 let mut ground_tile = false;
                 for (dx, dy) in directions {
                     let nx = (x as i32 + dx) as usize;
@@ -334,15 +436,23 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
                     if let Some(row) = matrix.get(ny) {
                         if let Some(tile) = row.get(nx) {
                             match tile {
-                                Tile::Ground | Tile::Unsure => {
-                                    ground_tile = true;
+                                Tile::Unsure => {
+                                    ground_tile_possible = true;
                                 },
+                                Tile::Ground => {
+                                    ground_tile_possible = true;
+                                    if ground_tile {
+                                        return false;
+                                    } else {
+                                        ground_tile = true;
+                                    }
+                                }
                                 _ => (),
                             }
                         }
                     }
                 }
-                if !ground_tile {
+                if !ground_tile_possible {
                     return false;
                 }
             }
@@ -369,8 +479,52 @@ fn is_possible(matrix: &Vec<Vec<Tile>>, nums_columns: &Vec<usize>, nums_rows: &V
         }
     }
 
-    // TODO (or not)
     // check for ground tile continuity
+    let mut flooded_coords = HashSet::new();
+    'seek_ground: for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Ground {
+                flooded_coords.insert((x, y));
+                break 'seek_ground;
+            }
+        }
+    }
+    if !flooded_coords.is_empty() {
+        loop {
+            let mut new_flooded_coords = vec![];
+            for (x, y) in flooded_coords.iter() {
+                for (dx, dy) in directions {
+                    let nx = (*x as i32 + dx) as usize;
+                    let ny = (*y as i32 + dy) as usize;
+                    if let Some(row) = matrix.get(ny) {
+                        if let Some(tile) = row.get(nx) {
+                            match tile {
+                                Tile::Ground | Tile::Unsure => {
+                                    if !flooded_coords.contains(&(nx, ny)) {
+                                        new_flooded_coords.push((nx, ny));
+                                    }
+                                },
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+            }
+            if new_flooded_coords.is_empty() {
+                break;
+            }
+        }
+    }
+    for x in 0..8 {
+        for y in 0..8 {
+            if matrix[y][x] == Tile::Ground && !flooded_coords.contains(&(x, y)){
+                return false;
+            }
+        }
+    }
+
+
+    // TODO (or not)
     // check for treasure room placement rules (1 exit, 3x3ness, ...)
     true
 }
